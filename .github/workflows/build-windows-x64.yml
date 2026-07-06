@@ -1,0 +1,42 @@
+name: Build Windows x64 EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: 'x64'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build LeaguePost
+        run: pyinstaller --noconfirm LeaguePost.spec
+
+      - name: Prepare release folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist\LeaguePost.exe release\LeaguePost.exe
+          Copy-Item UniversityRoster release\UniversityRoster -Recurse
+          Copy-Item Neo_Phoenix release\Neo_Phoenix -Recurse
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LeaguePost-windows-x64
+          path: release
