@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/
+release/
+*.exe
+*.spec.bak
+
+# Local app state / generated files
+leaguepost_config.json
+*.log
+reports/
+html_cache/
+games/
+league_team_01.xlsx
+league_team_02.xlsx
+*_backup*/
+*_bak*/
