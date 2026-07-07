@@ -31,7 +31,7 @@ from tkinter import font as tkfont
 
 APP_NAME = "LeaguePost"
 APP_TITLE = "LeagueSuite for WordPress - LeaguePost"
-APP_VERSION = "4.1.54 CustomTkinter Sidebar Edition"
+APP_VERSION = "4.1.71 CustomTkinter Sidebar Edition"
 
 POST_TYPE_RESULT = "試合速報"
 POST_TYPE_STANDINGS = "順位＆星取表"
@@ -243,6 +243,16 @@ def division_label_from_key(key: str) -> str:
         return "入替戦"
     return "１部"
 
+
+
+def division_key_from_label(label: str) -> str:
+    text = str(label or "").replace(" ", "").replace("\u3000", "")
+    text = text.replace("\uff11", "1").replace("\uff12", "2")
+    if "\u5165\u66ff" in text or "\u5165\u308c\u66ff\u3048" in text:
+        return "3"
+    if "2\u90e8" in text:
+        return "2"
+    return "1"
 
 def league_name_with_division(base_name: str, division_key: str) -> str:
     base = (base_name or "").strip()
@@ -2240,6 +2250,7 @@ class App(tk.Tk):
             "post_type": self.post_type_var.get(),
             "result_text": self.result_text.get("1.0", "end").strip(),
             "schedule_excel_file": self.schedule_excel_file_var.get().strip(),
+            "schedule_title": self.schedule_title_var.get().strip(),
             "schedule_download_url": self.schedule_download_url_var.get().strip(),
             "roster_mode": self.roster_mode_var.get() if hasattr(self, "roster_mode_var") else self.config_data.get("roster_mode", "all"),
             "roster_input_folder": self.roster_input_folder_var.get().strip() if hasattr(self, "roster_input_folder_var") else self.config_data.get("roster_input_folder", ""),
@@ -2468,8 +2479,16 @@ class App(tk.Tk):
 
         if self.wp_driver is not None:
             try:
-                _ = self.wp_driver.current_url
-                return self.wp_driver, WebDriverWait
+                handles = list(self.wp_driver.window_handles)
+                if handles:
+                    try:
+                        current = self.wp_driver.current_window_handle
+                    except Exception:
+                        current = None
+                    if current not in handles:
+                        self.wp_driver.switch_to.window(handles[-1])
+                    _ = self.wp_driver.current_url
+                    return self.wp_driver, WebDriverWait
             except Exception:
                 self.wp_driver = None
 
@@ -2483,6 +2502,7 @@ class App(tk.Tk):
             options.add_argument(f"--user-data-dir={profile}")
             options.add_argument("--profile-directory=Default")
             options.add_argument("--start-maximized")
+            options.add_argument("--remote-debugging-port=9222")
             options.add_experimental_option("detach", True)
             return options
 
@@ -2492,6 +2512,14 @@ class App(tk.Tk):
             return self.wp_driver, WebDriverWait
         except Exception as e:
             last_error = e
+
+        try:
+            attach_options = ChromeOptions()
+            attach_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+            self.wp_driver = webdriver.Chrome(options=attach_options)
+            return self.wp_driver, WebDriverWait
+        except Exception as e:
+            last_error = f"{last_error} / attach existing Chrome: {e}"
 
         # 2) EXE環境で Selenium Manager が同梱されない場合に備え、webdriver-manager で取得
         manager_pack = safe_import_webdriver_manager()
@@ -2963,11 +2991,25 @@ class CustomTkApp:
         )
 
         actions = self._action_row(card)
-        actions.grid(row=2, column=1, sticky="w", pady=(18, 18))
-        self._button(actions, text="\u5927\u4f1a\u4f5c\u6210", width=190, command=self.open_eleague_tournament_create).pack(side="left", padx=4)
-        self._button(actions, text="CupID\u53d6\u5f97", width=190, command=self.fetch_eleague_cup_ids).pack(side="left", padx=4)
-        self._button(actions, text="\u5927\u4f1a\u7de8\u96c6", width=220, command=self.run_eleague_tournament_edit_workflow).pack(side="left", padx=4)
-        self._button(actions, text="\u65e5\u7a0b\u7de8\u96c6", width=220, command=self.run_eleague_schedule_edit_workflow).pack(side="left", padx=4)
+        actions.grid(row=2, column=1, sticky="w", pady=(18, 8))
+        self._button(actions, text="E-league\u30ed\u30b0\u30a4\u30f3", width=170, command=self.open_eleague_chrome).pack(side="left", padx=4)
+        self._button(actions, text="\u5927\u4f1a\u4f5c\u6210", width=150, command=self.run_eleague_tournament_create_workflow).pack(side="left", padx=4)
+        self._button(actions, text="\u30eb\u30fc\u30eb\u8a2d\u5b9a", width=150, command=self.run_eleague_tournament_edit_workflow).pack(side="left", padx=4)
+        self._button(actions, text="\u5927\u4f1aID\u53d6\u5f97", width=160, command=self.fetch_eleague_tournament_ids).pack(side="left", padx=4)
+        self._button(actions, text="\u30c1\u30fc\u30e0\u767b\u9332", width=160, command=self.run_eleague_team_setup_workflow).pack(side="left", padx=4)
+        self._button(actions, text="\u65e5\u7a0b\u7de8\u96c6", width=160, command=self.run_eleague_schedule_edit_workflow).pack(side="left", padx=4)
+        self.ctk.CTkLabel(
+            card,
+            text="\u5fc5\u305a\u6700\u521d\u306bE-league\u306b\u624b\u52d5\u3067\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+            font=self.font(-1, "bold"),
+            text_color="#a15c00",
+        ).grid(row=3, column=1, sticky="w", padx=4, pady=(0, 4))
+        self.ctk.CTkLabel(
+            card,
+            text="E-league\u3078\u306e\u767b\u9332\u306fChrome\u3092\u9589\u3058\u305a\u306b\u4e00\u6c17\u306b\u5b9f\u884c\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+            font=self.font(-1, "bold"),
+            text_color="#a15c00",
+        ).grid(row=4, column=1, sticky="w", padx=4, pady=(0, 18))
 
     def _build_player_roster_page(self):
         page = self._make_page("選手名簿")
@@ -3279,13 +3321,34 @@ class CustomTkApp:
             self._roster_log(f"エラー: {exc}")
             messagebox.showerror(APP_NAME, str(exc))
 
-    def _run_eleague_combined_workflow(self, confirm_message, steps, complete_message):
+    def open_eleague_chrome(self):
+        try:
+            self.persist_settings()
+            url = self.eleague_url_var.get().strip() or DEFAULT_ELEAGUE_URL
+            if not (url.startswith("http://") or url.startswith("https://")):
+                raise ValueError("E-League URL\u306f http:// \u307e\u305f\u306f https:// \u304b\u3089\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044\u3002")
+            try:
+                driver, WebDriverWait = self._get_wp_driver()
+                driver.get(url)
+                WebDriverWait(driver, 60).until(
+                    lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+                )
+                focus_chrome_window(driver)
+            except Exception:
+                logging.warning(traceback.format_exc())
+                webbrowser.open(url)
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            messagebox.showerror(APP_NAME, str(e))
+    def _run_eleague_combined_workflow(self, confirm_message, steps, complete_message, progress_title="E-League \u81ea\u52d5\u51e6\u7406", allow_chrome_focus=False, show_progress=True):
         if not messagebox.askyesno(APP_NAME, confirm_message):
             return
         original_askyesno = messagebox.askyesno
         original_showinfo = messagebox.showinfo
         original_showwarning = messagebox.showwarning
         original_showerror = messagebox.showerror
+        original_focus_chrome = globals().get("focus_chrome_window")
+        original_suppress_progress = getattr(self, "_eleague_suppress_progress", False)
         warnings = []
 
         def yes_to_step_prompts(*args, **kwargs):
@@ -3301,12 +3364,40 @@ class CustomTkApp:
         def raise_error(title, message=None, *args, **kwargs):
             raise RuntimeError(str(message if message is not None else title))
 
+        def keep_app_foreground(*args, **kwargs):
+            try:
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
+            return None
+
+        step_entries = []
+        for item in steps:
+            if isinstance(item, tuple):
+                step_entries.append(item)
+            else:
+                step_entries.append((getattr(item, "__name__", "\u51e6\u7406"), item))
+
         try:
             messagebox.askyesno = yes_to_step_prompts
             messagebox.showinfo = collect_info
             messagebox.showwarning = collect_warning
             messagebox.showerror = raise_error
-            for step in steps:
+            self._eleague_suppress_progress = not show_progress
+            if original_focus_chrome is not None and not allow_chrome_focus:
+                globals()["focus_chrome_window"] = keep_app_foreground
+            if show_progress:
+                self._show_progress_dialog(
+                    progress_title,
+                    "Chrome\u3092\u6e96\u5099\u3057\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002",
+                )
+            for index, (label, step) in enumerate(step_entries, start=1):
+                if show_progress:
+                    self._show_progress_dialog(
+                        progress_title,
+                        f"{label}\u3092\u5b9f\u884c\u3057\u3066\u3044\u307e\u3059\u3002({index}/{len(step_entries)})\nChrome\u753b\u9762\u306f\u81ea\u52d5\u64cd\u4f5c\u4e2d\u3067\u3059\u3002\u5b8c\u4e86\u307e\u3067\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002",
+                    )
                 step()
         except Exception as exc:
             logging.error(traceback.format_exc())
@@ -3317,25 +3408,58 @@ class CustomTkApp:
             messagebox.showinfo = original_showinfo
             messagebox.showwarning = original_showwarning
             messagebox.showerror = original_showerror
+            if original_focus_chrome is not None:
+                globals()["focus_chrome_window"] = original_focus_chrome
+            self._eleague_suppress_progress = original_suppress_progress
             self._close_progress_dialog()
+            try:
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
         if warnings:
             original_showwarning(APP_NAME, complete_message + "\n\n" + "\n".join(warnings[:8]))
         else:
             original_showinfo(APP_NAME, complete_message)
 
+    def run_eleague_tournament_create_workflow(self):
+        self._run_eleague_combined_workflow(
+            "E-League\u3067\u5927\u4f1a\u4f5c\u6210\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u304c\u8868\u793a\u3055\u308c\u305f\u5834\u5408\u306f\u51e6\u7406\u3092\u505c\u6b62\u3057\u307e\u3059\u3002\u5148\u306bChrome\u3067E-League\u3078\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304b\u3089\u518d\u5b9f\u884c\u3057\u3066\u304f\u3060\u3055\u3044\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+            [("\u5927\u4f1a\u4f5c\u6210", self.open_eleague_tournament_create)],
+            "E-League\u306e\u5927\u4f1a\u4f5c\u6210\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+            "E-League \u5927\u4f1a\u4f5c\u6210",
+        )
+
     def run_eleague_tournament_edit_workflow(self):
         self._run_eleague_combined_workflow(
-            "E-League\u306e\u5927\u4f1a\u7de8\u96c6\u3092\u4e00\u62ec\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u5927\u4f1a\u7de8\u96c6 \u2192 \u30eb\u30fc\u30eb\u8a2d\u5b9a \u306e\u9806\u306b\u5b9f\u884c\u3057\u307e\u3059\u3002\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
-            [self.edit_eleague_tournaments, self.setup_eleague_rules_stadiums_outputs],
-            "E-League\u306e\u5927\u4f1a\u7de8\u96c6\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+            "E-League\u306e\u30eb\u30fc\u30eb\u8a2d\u5b9a\u3092\u4e00\u62ec\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u5927\u4f1a\u7de8\u96c6 \u2192 \u30eb\u30fc\u30eb\u8a2d\u5b9a \u2192 \u7403\u5834\u8ffd\u52a0 \u2192 \u5927\u4f1aID\u8a2d\u5b9a \u306e\u9806\u306b\u5b9f\u884c\u3057\u307e\u3059\u3002\nChrome\u753b\u9762\u3092\u524d\u9762\u306b\u51fa\u3057\u3001\u753b\u9762\u8868\u793a\u306b\u5408\u308f\u305b\u3066\u51e6\u7406\u3057\u307e\u3059\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+            [("\u5927\u4f1a\u7de8\u96c6", self.edit_eleague_tournaments), ("\u30eb\u30fc\u30eb\u8a2d\u5b9a", self.setup_eleague_rules_stadiums_outputs)],
+            "E-League\u306e\u30eb\u30fc\u30eb\u8a2d\u5b9a\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+            "E-League \u30eb\u30fc\u30eb\u8a2d\u5b9a",
+            allow_chrome_focus=True,
+            show_progress=False,
+        )
+
+    def run_eleague_team_setup_workflow(self):
+        self._run_eleague_combined_workflow(
+            "E-League\u306e\u30c1\u30fc\u30e0\u767b\u9332\u3092\u4e00\u62ec\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u30c1\u30fc\u30e0\u767b\u9332 \u2192 \u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a \u2192 \u7d44\u307f\u5408\u308f\u305b\u767b\u9332 \u306e\u9806\u306b\u5b9f\u884c\u3057\u307e\u3059\u3002\nChrome\u753b\u9762\u3092\u524d\u9762\u306b\u51fa\u3057\u3001\u51e6\u7406\u306e\u9032\u307f\u65b9\u3092\u78ba\u8a8d\u3067\u304d\u308b\u3088\u3046\u306b\u3057\u307e\u3059\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+            [("\u30c1\u30fc\u30e0\u767b\u9332", self.import_eleague_teams), ("\u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a\u30fb\u7d44\u307f\u5408\u308f\u305b\u767b\u9332", self.setup_eleague_groups)],
+            "E-League\u306e\u30c1\u30fc\u30e0\u767b\u9332\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+            "E-League \u30c1\u30fc\u30e0\u767b\u9332",
+            allow_chrome_focus=True,
+            show_progress=False,
         )
 
     def run_eleague_schedule_edit_workflow(self):
         self._run_eleague_combined_workflow(
-            "E-League\u306e\u65e5\u7a0b\u7de8\u96c6\u3092\u4e00\u62ec\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u30c1\u30fc\u30e0\u767b\u9332 \u2192 \u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a \u2192 \u65e5\u7a0b\u30fb\u7403\u5834 \u2192 \u8a18\u9332\u54e1 \u306e\u9806\u306b\u5b9f\u884c\u3057\u307e\u3059\u3002\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
-            [self.import_eleague_teams, self.setup_eleague_groups, self.register_eleague_schedule, self.setup_eleague_recorders],
+            "E-League\u306e\u65e5\u7a0b\u7de8\u96c6\u3092\u4e00\u62ec\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n\u5bfe\u6226\u30ab\u30fc\u30c9\u65e5\u7a0b\u30fb\u7403\u5834\u767b\u9332 \u2192 \u7403\u5834\u5225\u5165\u529b\u8005\u306e\u8a2d\u5b9a \u306e\u9806\u306b\u5b9f\u884c\u3057\u307e\u3059\u3002\nChrome\u753b\u9762\u3092\u524d\u9762\u306b\u51fa\u3057\u3001\u51e6\u7406\u306e\u9032\u307f\u65b9\u3092\u78ba\u8a8d\u3067\u304d\u308b\u3088\u3046\u306b\u3057\u307e\u3059\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+            [("\u5bfe\u6226\u30ab\u30fc\u30c9\u65e5\u7a0b\u30fb\u7403\u5834\u767b\u9332", self.register_eleague_schedule), ("\u7403\u5834\u5225\u5165\u529b\u8005\u306e\u8a2d\u5b9a", self.setup_eleague_recorders)],
             "E-League\u306e\u65e5\u7a0b\u7de8\u96c6\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002",
+            "E-League \u65e5\u7a0b\u7de8\u96c6",
+            allow_chrome_focus=True,
+            show_progress=False,
         )
+
 
     def _roster_eleague_import_payloads(self):
         output_file = self.roster_output_file_var.get().strip()
@@ -3402,11 +3526,11 @@ arguments[0].style.width = '1px';
             summary = "\n".join(f"{p['division']}: CupID {p['cup_id']} / {p['file_path']}" for p in payloads)
             if not messagebox.askyesno(
                 APP_NAME,
-                "E-league\u306e\u9078\u624b\u540d\u7c3f\u30a4\u30f3\u30dd\u30fc\u30c8\u753b\u9762\u3092\u958b\u304d\u3001\u51fa\u529b\u30d5\u30a1\u30a4\u30eb\u3092\u30bb\u30c3\u30c8\u3057\u307e\u3059\u3002\n\n"
-                f"{summary}\n\n"
-                "\u753b\u9762\u8868\u793a\u5f8c\u3001\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3066\u624b\u52d5\u3067\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+                "E-League\u306e\u51fa\u529b\u753b\u9762\u304b\u3089\u5927\u4f1aID\u3092\u53d6\u5f97\u3057\u307e\u3059\u3002\n\n"
+                "\u5927\u4f1aID\u3092\u624b\u5165\u529b\u3057\u305f\u5f8c\u306e\u78ba\u8a8d\u306b\u3082\u4f7f\u3048\u307e\u3059\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
             ):
                 return
+            use_progress = True
             self._show_progress_dialog("E-league \u9078\u624b\u540d\u7c3f\u767b\u9332", "Chrome\u3092\u6e96\u5099\u3057\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002")
             driver, WebDriverWait = self._get_wp_driver()
             tab_handles = {}
@@ -3441,7 +3565,8 @@ arguments[0].style.width = '1px';
                     self._upload_roster_file_to_eleague_import(driver, WebDriverWait, payload)
                     time.sleep(0.6)
             finally:
-                self._close_progress_dialog()
+                if use_progress:
+                    self._close_progress_dialog()
             if tab_handles.get("2"):
                 try:
                     driver.switch_to.window(tab_handles["2"])
@@ -3825,6 +3950,7 @@ arguments[0].style.width = '1px';
         self.tournament_id_var.set(initial_auto_id)
         self._last_auto_tournament_id = initial_auto_id
         self.schedule_excel_file_var.set(self.config_data.get("schedule_excel_file", ""))
+        self.schedule_title_var.set(self.config_data.get("schedule_title", ""))
         self.schedule_download_url_var.set(self.config_data.get("schedule_download_url", ""))
         self._set_text("dates_text", self.config_data.get("dates", ""))
         self._set_text("standings_text", self.config_data.get("standings_text", self.config_data.get("result_text", "")))
@@ -3861,15 +3987,15 @@ arguments[0].style.width = '1px';
         for page in self.pages.values():
             page.grid_remove()
         self.pages[name].grid(row=0, column=0, sticky="nsew")
-        self.page_title.configure(text=f"{name}　編集画面")
+        self.page_title.configure(text=f"{name}\u3000\u7de8\u96c6\u753b\u9762")
         for page_name, btn in self.nav_buttons.items():
             btn.configure(fg_color=("#1f6aa5" if page_name == name else "#3b8ed0"))
-        if name == "試合速報":
+        if name == "\u8a66\u5408\u901f\u5831":
             self.league_var.set(make_base_league_name(self.year_var.get().strip(), self.season_var.get()))
             self.apply_remembered_schedule_dates()
-        elif name == "順位表":
+        elif name == "\u9806\u4f4d\u8868":
             self.on_standings_division_changed(self.standings_division_var.get())
-        elif name == "個人賞":
+        elif name == "\u500b\u4eba\u8cde":
             self.on_awards_division_changed(self.awards_division_var.get())
             self.sync_awards_text_from_standings()
         elif name == "E-League":
@@ -3883,9 +4009,9 @@ arguments[0].style.width = '1px';
     def on_season_changed(self, value=None):
         self.update_schedule_title()
         base = make_base_league_name(self.year_var.get().strip(), self.season_var.get())
-        if self.current_page == "順位表":
+        if self.current_page == "\u9806\u4f4d\u8868":
             self.on_standings_division_changed(self.standings_division_var.get())
-        elif self.current_page == "個人賞":
+        elif self.current_page == "\u500b\u4eba\u8cde":
             self.on_awards_division_changed(self.awards_division_var.get())
         else:
             self.league_var.set(base)
@@ -3897,7 +4023,7 @@ arguments[0].style.width = '1px';
         self.league_var.set(make_base_league_name(year, season))
         self.ensure_tournament_id()
         if show_message:
-            messagebox.showinfo(APP_NAME, "大会名と大会IDを生成しました。")
+            messagebox.showinfo(APP_NAME, "\u5927\u4f1a\u540d\u3068\u5927\u4f1aID\u3092\u751f\u6210\u3057\u307e\u3057\u305f\u3002")
 
     def ensure_tournament_id(self):
         year = self.year_var.get().strip()
@@ -3928,7 +4054,7 @@ arguments[0].style.width = '1px';
         season = self.season_var.get()
         auto_base = make_base_league_name(year, season)
         current = self.league_var.get().strip()
-        if not current or current == auto_base or re.search(r"(１部|1部|２部|2部|入替戦|入れ替え戦)\s*$", current):
+        if not current or current == auto_base or re.search(r"(\uFF11\u90E8|1\u90E8|\uFF12\u90E8|2\u90E8|\u5165\u66FF\u6226|\u5165\u308C\u66FF\u3048\u6226)\s*$", current):
             self.league_var.set(make_league_name(year, season, division))
         self.ensure_tournament_id()
 
@@ -4766,6 +4892,7 @@ function debugFields() {
             ):
                 return
             driver, WebDriverWait = self._get_wp_driver()
+            focus_chrome_window(driver)
 
             def wait_ready(timeout=60):
                 WebDriverWait(driver, timeout).until(
@@ -4776,6 +4903,7 @@ function debugFields() {
             failures = []
             for payload in payloads:
                 driver.get(f"https://safe.omyutech.com/cup/{payload['cup_id']}")
+                focus_chrome_window(driver)
                 wait_ready()
                 WebDriverWait(driver, 30).until(
                     lambda d: d.execute_script("return !!document.body && (document.body.innerText || document.body.textContent || '').length > 0")
@@ -5004,39 +5132,66 @@ function setValue(el, value) {
   el.dispatchEvent(new InputEvent("input", {bubbles:true, inputType:"insertText", data:value}));
   el.dispatchEvent(new Event("change", {bubbles:true}));
 }
-function clickEmbedTab() {
-  const buttons = [...document.querySelectorAll("button, [role='button']")].filter(visible);
-  const tab = buttons.find(btn => /ウェブサイトに埋め込む/.test(textOf(btn)));
-  if (!tab) return true;
-  tab.scrollIntoView({block:"center", inline:"center"});
-  tab.click();
-  return true;
+
+function messageText() {
+  return String(document.body ? (document.body.innerText || document.body.textContent || "") : "");
 }
 function clickSetting() {
   const buttons = [...document.querySelectorAll("button, [role='button']")].filter(visible);
-  const button = buttons.find(btn => /^設定$/.test(textOf(btn)));
+  const button = buttons.find(btn => /^\u8a2d\u5b9a$|\u767b\u9332|\u4fdd\u5b58/.test(textOf(btn)) && !btn.disabled);
   if (!button) return false;
   button.scrollIntoView({block:"center", inline:"center"});
   button.click();
   return true;
 }
-function messageText() {
-  return (document.body ? (document.body.innerText || document.body.textContent || "") : "");
-}
 function candidateIds(base) {
+  base = String(base || "").replace(/[^0-9A-Za-z]/g, "");
   const ids = [base];
-  for (const suffix of "abcdefghijklmnopqrstuvwxyz") ids.push(base + suffix);
-  for (let i = 2; i <= 99; i++) ids.push(base + String(i));
+  for (let i = 2; i <= 20; i++) ids.push(`${base}_${i}`);
   return ids;
+}
+function cupCodeInput() {
+  const inputs = [...document.querySelectorAll('input, textarea')].filter(visible);
+  return inputs.find(el => el.name === "cupCode")
+    || inputs.find(el => /cup[_-]?code/i.test(el.name || ""))
+    || inputs.find(el => /\u5927\u4f1a\u30b3\u30fc\u30c9/.test((el.placeholder || "") + " " + textOf(el.closest("label") || el.parentElement)));
+}
+function candidateTabElements() {
+  const exact = "\u30a6\u30a7\u30d6\u30b5\u30a4\u30c8\u306b\u57cb\u3081\u8fbc\u3080";
+  return [...document.querySelectorAll("button[role='tab'], [role='tab'], button, a")]
+    .filter(el => textOf(el) === exact || textOf(el).includes(exact))
+    .map(el => el.closest("button, a, [role='button'], [role='tab']") || el);
+}
+function scrollTabAreas() {
+  for (const el of document.querySelectorAll(".output-tab .MuiTabs-scroller, .MuiTabs-scroller, .MuiTabs-flexContainer, [role='tablist']")) {
+    try { el.scrollLeft = el.scrollWidth; } catch (e) {}
+  }
+  try { window.scrollTo(0, 0); } catch (e) {}
+}
+async function clickEmbedTab() {
+  for (let i = 0; i < 120; i++) {
+    if (visible(cupCodeInput())) return true;
+    scrollTabAreas();
+    const tabs = candidateTabElements();
+    const tab = tabs.find(el => visible(el)) || tabs[0];
+    if (tab) {
+      tab.scrollIntoView({block:"center", inline:"center"});
+      tab.click();
+      await sleep(900);
+      if (visible(cupCodeInput())) return true;
+    }
+    await sleep(500);
+  }
+  return visible(cupCodeInput());
 }
 (async () => {
   try {
-    clickEmbedTab();
-    for (let i = 0; i < 50; i++) {
-      if (visible(document.querySelector('input[name="cupCode"]'))) break;
-      await sleep(200);
+    if (!await clickEmbedTab()) throw new Error("\u30a6\u30a7\u30d6\u30b5\u30a4\u30c8\u306b\u57cb\u3081\u8fbc\u3080\u30bf\u30d6\u3092\u691c\u51fa\u3067\u304d\u307e\u305b\u3093");
+    for (let i = 0; i < 120; i++) {
+      if (visible(cupCodeInput())) break;
+      await sleep(500);
     }
-    const input = document.querySelector('input[name="cupCode"]');
+    const input = cupCodeInput();
     if (!visible(input)) throw new Error("大会コード欄を検出できません");
     const base = String(payload.tournament_id || payload.tournament_id_base || "").replace(/[^0-9A-Za-z]/g, "");
     if (!base) throw new Error("大会コードが空です");
@@ -5064,6 +5219,118 @@ function candidateIds(base) {
             payload,
         )
 
+    def _eleague_read_output_code(self, driver):
+        return driver.execute_async_script(
+            r"""
+const done = arguments[arguments.length - 1];
+const result = {ok:false, message:"", tournament_id:""};
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function visible(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const s = getComputedStyle(el);
+  return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+}
+function textOf(el) { return (el && (el.innerText || el.textContent) || "").trim(); }
+function cupCodeInput() {
+  return document.querySelector('input[name="cupCode"], input[name="cup_code"], input[placeholder*="\u5927\u4f1a\u30b3\u30fc\u30c9"]');
+}
+function candidateTabElements() {
+  const exact = "\u30a6\u30a7\u30d6\u30b5\u30a4\u30c8\u306b\u57cb\u3081\u8fbc\u3080";
+  return [...document.querySelectorAll("button[role='tab'], [role='tab'], button, a")]
+    .filter(el => textOf(el) === exact || textOf(el).includes(exact))
+    .map(el => el.closest("button, a, [role='button'], [role='tab']") || el);
+}
+function scrollTabAreas() {
+  for (const el of document.querySelectorAll(".output-tab .MuiTabs-scroller, .MuiTabs-scroller, .MuiTabs-flexContainer, [role='tablist']")) {
+    try { el.scrollLeft = el.scrollWidth; } catch (e) {}
+  }
+  try { window.scrollTo(0, 0); } catch (e) {}
+}
+async function clickEmbedTab() {
+  for (let i = 0; i < 120; i++) {
+    if (visible(cupCodeInput())) return true;
+    scrollTabAreas();
+    const tabs = candidateTabElements();
+    const tab = tabs.find(el => visible(el)) || tabs[0];
+    if (tab) {
+      tab.scrollIntoView({block:"center", inline:"center"});
+      tab.click();
+      await sleep(900);
+      if (visible(cupCodeInput())) return true;
+    }
+    await sleep(500);
+  }
+  return visible(cupCodeInput());
+}
+(async () => {
+  try {
+    if (!await clickEmbedTab()) throw new Error("\u30a6\u30a7\u30d6\u30b5\u30a4\u30c8\u306b\u57cb\u3081\u8fbc\u3080\u30bf\u30d6\u3092\u691c\u51fa\u3067\u304d\u307e\u305b\u3093");
+    const input = cupCodeInput();
+    if (!visible(input)) throw new Error("\u5927\u4f1a\u30b3\u30fc\u30c9\u6b04\u3092\u691c\u51fa\u3067\u304d\u307e\u305b\u3093");
+    const value = String(input.value || input.getAttribute("value") || "").trim();
+    if (!value) throw new Error("\u5927\u4f1a\u30b3\u30fc\u30c9\u6b04\u304c\u7a7a\u3067\u3059\u3002E-League\u753b\u9762\u3067\u624b\u5165\u529b\u5f8c\u3001\u518d\u5ea6\u53d6\u5f97\u3057\u3066\u304f\u3060\u3055\u3044\u3002");
+    result.ok = true;
+    result.tournament_id = value;
+    done(result);
+  } catch (e) {
+    result.message = String(e && e.message ? e.message : e);
+    done(result);
+  }
+})();
+"""
+        )
+
+    def fetch_eleague_tournament_ids(self):
+        try:
+            payloads = self._eleague_stage3_payloads()
+            if not messagebox.askyesno(
+                APP_NAME,
+                "E-League\u306e\u51fa\u529b\u753b\u9762\u304b\u3089\u5927\u4f1aID\u3092\u53d6\u5f97\u3057\u307e\u3059\u3002\n\n"
+                "\u5927\u4f1aID\u3092\u624b\u5165\u529b\u3057\u305f\u5f8c\u306e\u78ba\u8a8d\u306b\u3082\u4f7f\u3048\u307e\u3059\u3002\n\n\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
+            ):
+                return
+            driver, WebDriverWait = self._get_wp_driver()
+
+            def wait_ready(timeout=60):
+                WebDriverWait(driver, timeout).until(
+                    lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+                )
+
+            successes = []
+            failures = []
+            for payload in payloads:
+                label = payload["division"]
+                cup_id = payload["cup_id"]
+                driver.get(f"https://safe.omyutech.com/cup/{cup_id}/output")
+                focus_chrome_window(driver)
+                wait_ready()
+                time.sleep(1.0)
+                result = self._eleague_read_output_code(driver)
+                if result and result.get("ok"):
+                    tournament_id = result.get("tournament_id", "").strip()
+                    self._set_eleague_tournament_id_for_key(payload["division_key"], tournament_id)
+                    successes.append(f"{label}: {tournament_id}")
+                    if payload["division_key"] == division_key_from_label(self.division_var.get()):
+                        self.tournament_id_var.set(tournament_id)
+                    time.sleep(0.6)
+                else:
+                    failures.append(f"{label}: {(result or {}).get('message', result)}")
+            if successes:
+                self.persist_settings()
+            if failures:
+                messagebox.showwarning(
+                    APP_NAME,
+                    "\u5927\u4f1aID\u53d6\u5f97\u3092\u5b9f\u884c\u3057\u307e\u3057\u305f\u3002\n\n"
+                    f"\u6210\u529f:\n{chr(10).join(successes) if successes else '\u306a\u3057'}\n\n"
+                    "\u5931\u6557:\n" + "\n".join(failures),
+                )
+            else:
+                messagebox.showinfo(APP_NAME, "\u5927\u4f1aID\u53d6\u5f97\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002\n" + "\n".join(successes))
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            messagebox.showerror(APP_NAME, str(e))
+
     def setup_eleague_rules_stadiums_outputs(self):
         try:
             payloads = self._eleague_stage3_payloads()
@@ -5080,6 +5347,7 @@ function candidateIds(base) {
             ):
                 return
             driver, WebDriverWait = self._get_wp_driver()
+            focus_chrome_window(driver)
 
             def wait_ready(timeout=60):
                 WebDriverWait(driver, timeout).until(
@@ -5106,6 +5374,7 @@ function candidateIds(base) {
                 cup_id = payload["cup_id"]
 
                 driver.get(f"https://safe.omyutech.com/cup/{cup_id}/info/leaguerule")
+                focus_chrome_window(driver)
                 wait_ready()
                 wait_page_text(r"設定パターン|登録|リーグ規定|ルール", 60)
                 rule_result = self._eleague_set_rule_pattern(driver, payload)
@@ -5115,6 +5384,7 @@ function candidateIds(base) {
                 time.sleep(1.5)
 
                 driver.get(f"https://safe.omyutech.com/cup/{cup_id}/info/stadium")
+                focus_chrome_window(driver)
                 wait_ready()
                 wait_page_text(r"球場追加|球場リスト|球場", 60)
                 stadium_result = self._eleague_add_stadiums(driver, payload)
@@ -5124,6 +5394,7 @@ function candidateIds(base) {
                 time.sleep(1.5)
 
                 driver.get(f"https://safe.omyutech.com/cup/{cup_id}/output")
+                focus_chrome_window(driver)
                 wait_ready()
                 wait_page_text(r"ウェブサイトに埋め込む|大会コード|設定", 60)
                 output_result = self._eleague_set_output_code(driver, payload)
@@ -5219,6 +5490,35 @@ function candidateIds(base) {
         file_path = Path(payload["file_path"]).resolve()
         if not file_path.exists():
             return {"ok": False, "message": f"インポートファイルが見つかりません: {file_path}"}
+        driver.execute_async_script(
+            r"""
+const done = arguments[arguments.length - 1];
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function text() { return document.body ? (document.body.innerText || document.body.textContent || "") : ""; }
+(async () => {
+  let stableSince = 0;
+  let last = "";
+  const started = Date.now();
+  while (Date.now() - started < 30000) {
+    const nowText = text();
+    const hasImportUi = nowText.length > 50;
+    const hasFile = !!document.querySelector('input[type="file"]');
+    if (hasImportUi && hasFile) {
+      if (nowText === last) {
+        stableSince += 250;
+        if (stableSince >= 2000) { done(true); return; }
+      } else {
+        stableSince = 0;
+        last = nowText;
+      }
+    }
+    await sleep(250);
+  }
+  done(false);
+})();
+"""
+        )
+        time.sleep(0.8)
         file_input = WebDriverWait(driver, 60).until(
             lambda d: d.find_element(By.CSS_SELECTOR, 'input[type="file"][accept*=".xls"]')
         )
@@ -5305,7 +5605,7 @@ function buttonByExactText(pattern) {
         readResult.button.click();
         await sleep(500);
       }
-      const importResult = buttonByExactText(/^(?:\+|＋)?インポート$/);
+      const importResult = buttonByExactText(/^(?:\+|\uFF0B)?(?:\u30a4\u30f3\u30dd\u30fc\u30c8|\u8ffd\u52a0|\u65b0\u898f\u8ffd\u52a0|\u767b\u9332)$/);
       lastButtons = importResult.visibleText || lastButtons;
       if (importResult.button) {
         if (!await waitForTeamRows(15000)) {
@@ -5335,30 +5635,35 @@ function buttonByExactText(pattern) {
             payloads = self._eleague_team_import_payloads()
             self.persist_settings()
             summary = "\n".join(
-                f"{p['division']}: {p['row_count']}チーム / {p['file_path']}"
+                f"{p['division']}: {p['row_count']}\u30c1\u30fc\u30e0 / {p['file_path']}"
                 for p in payloads
             )
             if not messagebox.askyesno(
                 APP_NAME,
-                "E-Leagueへチームをインポートします。\n\n"
+                "E-League\u3078\u30c1\u30fc\u30e0\u3092\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u307e\u3059\u3002\n\n"
                 f"{summary}\n\n"
-                "対象は１部・２部のみです。続行しますか？",
+                "\u5bfe\u8c61\u306f\uff11\u90e8\u30fb\uff12\u90e8\u306e\u307f\u3067\u3059\u3002\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
             ):
                 return
-            self._show_progress_dialog(
-                "E-League チーム登録",
-                "Chromeを準備しています。\nしばらくお待ちください。",
-            )
+            use_progress = not getattr(self, "_eleague_suppress_progress", False)
+            if use_progress:
+                self._show_progress_dialog(
+                    "E-League \u30c1\u30fc\u30e0\u767b\u9332",
+                    "Chrome\u3092\u6e96\u5099\u3057\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002",
+                )
             driver, WebDriverWait = self._get_wp_driver()
+            focus_chrome_window(driver)
 
             def wait_ready(timeout=60):
-                self._update_progress_dialog("ページの読み込み完了を待っています。\nしばらくお待ちください。")
+                if use_progress:
+                    self._update_progress_dialog("\u30da\u30fc\u30b8\u306e\u8aad\u307f\u8fbc\u307f\u5b8c\u4e86\u3092\u5f85\u3063\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002")
                 WebDriverWait(driver, timeout).until(
                     lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
                 )
 
             def wait_page_text(pattern, timeout=60):
-                self._update_progress_dialog("E-League画面の表示完了を待っています。\nネットワーク状況により時間がかかる場合があります。")
+                if use_progress:
+                    self._update_progress_dialog("E-League\u753b\u9762\u306e\u8868\u793a\u5b8c\u4e86\u3092\u5f85\u3063\u3066\u3044\u307e\u3059\u3002\n\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u72b6\u6cc1\u306b\u3088\u308a\u6642\u9593\u304c\u304b\u304b\u308b\u5834\u5408\u304c\u3042\u308a\u307e\u3059\u3002")
                 regex = re.compile(pattern)
                 WebDriverWait(driver, timeout).until(
                     lambda d: bool(regex.search(d.execute_script(
@@ -5377,29 +5682,43 @@ function buttonByExactText(pattern) {
                 for index, payload in enumerate(payloads, start=1):
                     label = payload["division"]
                     cup_id = payload["cup_id"]
-                    self._update_progress_dialog(
-                        f"{label}のチーム登録を開始しています。({index}/{len(payloads)})\n"
-                        f"{payload['row_count']}チームのExcelをE-Leagueへ送信します。"
-                    )
-                    driver.get(f"https://safe.omyutech.com/cup/{cup_id}/team/add")
-                    wait_ready()
-                    wait_page_text(r"チームをインポート|Excelファイル|出場チーム追加|インポート", 60)
-                    self._update_progress_dialog(
-                        f"{label}のExcelファイルをアップロードしています。({index}/{len(payloads)})\n"
-                        "チーム一覧が画面に表示されるまで待ってからインポートします。"
-                    )
-                    result = self._eleague_import_team_file(driver, WebDriverWait, payload)
-                    if result and result.get("ok"):
-                        successes.append(f"{label}: {payload['row_count']}チーム")
+                    if use_progress:
                         self._update_progress_dialog(
-                            f"{label}のチーム登録が完了しました。({index}/{len(payloads)})\n"
-                            "次の処理へ進みます。"
+                            f"{label}\u306e\u30c1\u30fc\u30e0\u767b\u9332\u3092\u958b\u59cb\u3057\u3066\u3044\u307e\u3059\u3002({index}/{len(payloads)})\n"
+                            f"{payload['row_count']}\u30c1\u30fc\u30e0\u306eExcel\u3092E-League\u3078\u9001\u4fe1\u3057\u307e\u3059\u3002"
                         )
+                    result = None
+                    for attempt in range(1, 4):
+                        try:
+                            driver.get(f"https://safe.omyutech.com/cup/{cup_id}/team/add")
+                            focus_chrome_window(driver)
+                            wait_ready()
+                            wait_page_text("\u30c1\u30fc\u30e0\u3092\u30a4\u30f3\u30dd\u30fc\u30c8|Excel\u30d5\u30a1\u30a4\u30eb|\u51fa\u5834\u30c1\u30fc\u30e0\u8ffd\u52a0|\u30a4\u30f3\u30dd\u30fc\u30c8", 60)
+                            if use_progress:
+                                self._update_progress_dialog(
+                                    f"{label}\u306eExcel\u30d5\u30a1\u30a4\u30eb\u3092\u30a2\u30c3\u30d7\u30ed\u30fc\u30c9\u3057\u3066\u3044\u307e\u3059\u3002({index}/{len(payloads)})\n"
+                                    f"\u30c1\u30fc\u30e0\u4e00\u89a7\u304c\u8868\u793a\u3055\u308c\u308b\u307e\u3067\u5f85\u3061\u307e\u3059\u3002\uff08\u8a66\u884c {attempt}/3\uff09"
+                                )
+                            result = self._eleague_import_team_file(driver, WebDriverWait, payload)
+                            if result and result.get("ok"):
+                                break
+                        except Exception as exc:
+                            result = {"ok": False, "message": str(exc)}
+                        if attempt < 3:
+                            time.sleep(1.2)
+                    if result and result.get("ok"):
+                        successes.append(f"{label}: {payload['row_count']}\u30c1\u30fc\u30e0")
+                        if use_progress:
+                            self._update_progress_dialog(
+                                f"{label}\u306e\u30c1\u30fc\u30e0\u767b\u9332\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002({index}/{len(payloads)})\n"
+                                "\u6b21\u306e\u51e6\u7406\u3078\u9032\u307f\u307e\u3059\u3002"
+                            )
                         time.sleep(1.5)
                     else:
                         failures.append(f"{label}: {(result or {}).get('message', result)}")
             finally:
-                self._close_progress_dialog()
+                if use_progress:
+                    self._close_progress_dialog()
             try:
                 self.root.lift()
                 self.root.focus_force()
@@ -5408,12 +5727,12 @@ function buttonByExactText(pattern) {
             if failures:
                 messagebox.showwarning(
                     APP_NAME,
-                    "E-Leagueチーム登録を実行しました。\n\n"
-                    f"成功:\n{chr(10).join(successes) if successes else 'なし'}\n\n"
-                    "失敗:\n" + "\n".join(failures),
+                    "E-League\u30c1\u30fc\u30e0\u767b\u9332\u3092\u5b9f\u884c\u3057\u307e\u3057\u305f\u3002\n\n"
+                    f"\u6210\u529f:\n{chr(10).join(successes) if successes else '\u306a\u3057'}\n\n"
+                    "\u5931\u6557:\n" + "\n".join(failures),
                 )
             else:
-                messagebox.showinfo(APP_NAME, "E-Leagueチーム登録が完了しました。\n" + "\n".join(successes))
+                messagebox.showinfo(APP_NAME, "E-League\u30c1\u30fc\u30e0\u767b\u9332\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002\n" + "\n".join(successes))
         except Exception as e:
             self._close_progress_dialog()
             logging.error(traceback.format_exc())
@@ -5500,17 +5819,38 @@ function clickRegister() {
     clickCheckbox(teamSetting);
     await sleep(800);
 
-    const checkboxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(visible);
-    const allSelect = checkboxes.find(input => input !== teamSetting && /すべて|全て|全選択|selectall/i.test(labelText(input)));
-    if (allSelect) {
-      clickCheckbox(allSelect);
+    const allTeamsRadio = [...document.querySelectorAll('input[type="radio"][name="teamRangeType"]')]
+      .find(input => String(input.value) === "1" || /\u3059\u3079\u3066\u306e\u30c1\u30fc\u30e0|\u5168\u3066\u306e\u30c1\u30fc\u30e0/.test(labelText(input)));
+    if (allTeamsRadio && !allTeamsRadio.checked) {
+      allTeamsRadio.scrollIntoView({block:"center", inline:"center"});
+      allTeamsRadio.click();
+      allTeamsRadio.dispatchEvent(new Event("change", {bubbles:true}));
       result.checkedAll += 1;
+      await sleep(400);
+    }
+
+    const clickAllText = [...document.querySelectorAll("label, button, [role='button'], span, div")]
+      .filter(visible)
+      .find(el => /^(\u3059\u3079\u3066\u3092\u9078\u629e|\u5168\u3066\u3092\u9078\u629e)$/.test(textOf(el)));
+    if (clickAllText) {
+      const target = clickAllText.closest("label, button, [role='button']") || clickAllText;
+      target.scrollIntoView({block:"center", inline:"center"});
+      target.click();
+      result.checkedAll += 1;
+      await sleep(400);
     } else {
-      for (const input of checkboxes) {
-        if (input === teamSetting) continue;
-        if (!input.checked) {
-          clickCheckbox(input);
-          result.checkedAll += 1;
+      const checkboxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(visible);
+      const allSelect = checkboxes.find(input => input !== teamSetting && /\u3059\u3079\u3066|\u5168\u3066|\u5168\u9078\u629e|selectall/i.test(labelText(input)));
+      if (allSelect) {
+        clickCheckbox(allSelect);
+        result.checkedAll += 1;
+      } else {
+        for (const input of checkboxes) {
+          if (input === teamSetting) continue;
+          if (!input.checked) {
+            clickCheckbox(input);
+            result.checkedAll += 1;
+          }
         }
       }
     }
@@ -5542,14 +5882,31 @@ function visible(el) {
 }
 function textOf(el) { return (el && (el.innerText || el.textContent) || "").trim(); }
 function norm(value) { return String(value || "").replace(/[\s　\u200b\u200c\ufeff.．。、:：]/g, "").toLowerCase(); }
-async function waitFor(predicate, timeoutMs) {
+async function waitFor(predicate, timeoutMs, message) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const value = predicate();
     if (value) return value;
     await sleep(300);
   }
-  return null;
+  throw new Error(message || "timeout");
+}
+async function waitStable(snapshot, timeoutMs, stableMs, message) {
+  const started = Date.now();
+  let last = "";
+  let stable = 0;
+  while (Date.now() - started < timeoutMs) {
+    const now = snapshot();
+    if (now && now === last) {
+      stable += 250;
+      if (stable >= stableMs) return now;
+    } else {
+      last = now;
+      stable = 0;
+    }
+    await sleep(250);
+  }
+  throw new Error(message || "stable timeout");
 }
 function teamButtons() {
   return [...document.querySelectorAll("button, [role='button']")]
@@ -5581,26 +5938,35 @@ function targetButtons() {
   }
   return targets.filter(Boolean);
 }
+function mouseClick(el) {
+  el.scrollIntoView({block:"center", inline:"center"});
+  try { el.click(); } catch (e) {
+    try { el.dispatchEvent(new MouseEvent("click", {bubbles:true, cancelable:true, view:window})); } catch (_e) {}
+  }
+}
+function pageSnapshot() {
+  return [teamButtons().map(x => x.text).join("|"), targetButtons().length, document.body ? document.body.innerText.length : 0].join("#");
+}
 (async () => {
   try {
     const teams = payload.team_names || [];
     const count = Number(payload.teams_num || teams.length || 0);
-    if (!count) throw new Error("チーム数が空です");
-    await waitFor(() => teamButtons().length >= count, 60000);
-    await waitFor(() => targetButtons().length >= count, 60000);
+    if (!count) throw new Error("team count is empty");
+    await waitFor(() => teamButtons().length >= count, 60000, "left team buttons were not rendered");
+    await waitFor(() => targetButtons().length >= count, 60000, "table targets were not rendered");
+    await waitStable(pageSnapshot, 60000, 2000, "tournament page was not stable");
     for (let i = 0; i < count; i++) {
+      await waitStable(pageSnapshot, 30000, 1000, "tournament page changed too long");
       const targets = targetButtons();
       const target = targets[i];
-      if (!target) throw new Error("Tableの設定先を検出できません: " + (i + 1));
-      target.scrollIntoView({block:"center", inline:"center"});
-      target.click();
-      await sleep(250);
+      if (!target) throw new Error("table target not found: " + (i + 1));
+      mouseClick(target);
+      await sleep(700);
       const team = findTeamButton(i + 1, teams[i]);
-      if (!team) throw new Error("左のチームボタンを検出できません: " + (i + 1));
-      team.btn.scrollIntoView({block:"center", inline:"center"});
-      team.btn.click();
+      if (!team) throw new Error("left team button not found: " + (i + 1));
+      mouseClick(team.btn);
       result.assigned.push(team.text);
-      await sleep(500);
+      await sleep(1200);
     }
     result.ok = true;
     done(result);
@@ -5612,36 +5978,103 @@ function targetButtons() {
 ''',
             payload,
         )
+    def _eleague_click_top_tab(self, driver, tab_label, expected_pattern=None, timeout=60):
+        result = driver.execute_async_script(
+            r"""
+const label = arguments[0];
+const expected = arguments[1] || "";
+const timeoutMs = Number(arguments[2] || 60000);
+const done = arguments[arguments.length - 1];
+const result = {ok:false, message:""};
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function visible(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const s = getComputedStyle(el);
+  return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+}
+function textOf(el) { return (el && (el.innerText || el.textContent) || "").trim().replace(/\s+/g, " "); }
+function pageText() { return document.body ? (document.body.innerText || document.body.textContent || "") : ""; }
+function scrollTabAreas() {
+  for (const el of document.querySelectorAll(".MuiTabs-scroller, .MuiTabs-flexContainer, [role='tablist']")) {
+    try { el.scrollLeft = 0; } catch (e) {}
+  }
+  try { window.scrollTo(0, 0); } catch (e) {}
+}
+function findTab() {
+  const tabs = [...document.querySelectorAll("button[role='tab'], [role='tab'], button")].filter(visible);
+  return tabs.find(el => textOf(el) === label) || tabs.find(el => textOf(el).includes(label));
+}
+(async () => {
+  try {
+    const started = Date.now();
+    let lastTabs = "";
+    while (Date.now() - started < timeoutMs) {
+      scrollTabAreas();
+      const tabs = [...document.querySelectorAll("button[role='tab'], [role='tab'], button")].filter(visible);
+      lastTabs = tabs.map(textOf).filter(Boolean).join(" / ") || lastTabs;
+      const tab = findTab();
+      if (tab) {
+        tab.scrollIntoView({block:"center", inline:"center"});
+        tab.click();
+        await sleep(1000);
+        if (!expected || new RegExp(expected).test(pageText())) {
+          result.ok = true;
+          done(result);
+          return;
+        }
+      }
+      await sleep(500);
+    }
+    result.message = "top tab not found: " + label + " / visible tabs: " + lastTabs;
+    done(result);
+  } catch (e) {
+    result.message = String(e && e.message ? e.message : e);
+    done(result);
+  }
+})();
+""",
+            tab_label,
+            expected_pattern or "",
+            timeout * 1000,
+        )
+        if not result or not result.get("ok"):
+            raise RuntimeError((result or {}).get("message", result))
+        return result
 
     def setup_eleague_groups(self):
         try:
             payloads = self._eleague_stage5_payloads()
             self.persist_settings()
             summary = "\n".join(
-                f"{p['division']}: CupID {p['cup_id']} / {p['teams_num']}チーム"
+                f"{p['division']}: CupID {p['cup_id']} / {p['teams_num']}\u30c1\u30fc\u30e0"
                 for p in payloads
             )
             if not messagebox.askyesno(
                 APP_NAME,
-                "E-League第五段階を自動設定します。\n\n"
-                "グループ設定と組合わせ表へのチーム割り当てを実行します。\n\n"
-                f"{summary}\n\n対象は１部・２部のみです。続行しますか？",
+                "E-League\u306e\u30c1\u30fc\u30e0\u8a2d\u5b9a\u3092\u81ea\u52d5\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n"
+                "\u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a\u3068\u7d44\u5408\u308f\u305b\u8868\u3078\u306e\u30c1\u30fc\u30e0\u5272\u308a\u5f53\u3066\u3092\u5b9f\u884c\u3057\u307e\u3059\u3002\n\n"
+                f"{summary}\n\n\u5bfe\u8c61\u306f\uFF11\u90E8\u30fb\uFF12\u90E8\u306e\u307f\u3067\u3059\u3002\u7d9a\u884c\u3057\u307e\u3059\u304b\uff1f",
             ):
                 return
-            self._show_progress_dialog(
-                "E-League グループ設定",
-                "Chromeを準備しています。\nしばらくお待ちください。",
-            )
+            use_progress = not getattr(self, "_eleague_suppress_progress", False)
+            if use_progress:
+                self._show_progress_dialog(
+                    "E-League \u30c1\u30fc\u30e0\u8a2d\u5b9a",
+                    "Chrome\u3092\u6e96\u5099\u3057\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002",
+                )
             driver, WebDriverWait = self._get_wp_driver()
 
             def wait_ready(timeout=60):
-                self._update_progress_dialog("ページの読み込み完了を待っています。\nしばらくお待ちください。")
+                if use_progress:
+                    self._update_progress_dialog("\u30da\u30fc\u30b8\u306e\u8aad\u307f\u8fbc\u307f\u5b8c\u4e86\u3092\u5f85\u3063\u3066\u3044\u307e\u3059\u3002\n\u3057\u3070\u3089\u304f\u304a\u5f85\u3061\u304f\u3060\u3055\u3044\u3002")
                 WebDriverWait(driver, timeout).until(
                     lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
                 )
 
             def wait_page_text(pattern, timeout=60):
-                self._update_progress_dialog("E-League画面の表示完了を待っています。\nネットワーク状況により時間がかかる場合があります。")
+                if use_progress:
+                    self._update_progress_dialog("E-League\u753b\u9762\u306e\u8868\u793a\u5b8c\u4e86\u3092\u5f85\u3063\u3066\u3044\u307e\u3059\u3002\n\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u72b6\u6cc1\u306b\u3088\u308a\u6642\u9593\u304c\u304b\u304b\u308b\u5834\u5408\u304c\u3042\u308a\u307e\u3059\u3002")
                 regex = re.compile(pattern)
                 WebDriverWait(driver, timeout).until(
                     lambda d: bool(regex.search(d.execute_script(
@@ -5660,34 +6093,39 @@ function targetButtons() {
                 for index, payload in enumerate(payloads, start=1):
                     label = payload["division"]
                     cup_id = payload["cup_id"]
-                    self._update_progress_dialog(
-                        f"{label}のグループ設定を開始しています。({index}/{len(payloads)})\n"
-                        f"{payload['teams_num']}チームをグループ1へ設定します。"
-                    )
+                    if use_progress:
+                        self._update_progress_dialog(
+                            f"{label}\u306e\u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a\u3092\u958b\u59cb\u3057\u3066\u3044\u307e\u3059\u3002({index}/{len(payloads)})\n"
+                            f"{payload['teams_num']}\u30c1\u30fc\u30e0\u3092\u8a2d\u5b9a\u3057\u307e\u3059\u3002"
+                        )
                     driver.get(f"https://safe.omyutech.com/cup/{cup_id}/tournamentset")
+                    focus_chrome_window(driver)
                     wait_ready()
-                    wait_page_text(r"グループ設定|参加チーム数|参加チーム設定|登録", 60)
+                    wait_page_text(r"\u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a|\u53c2\u52a0\u30c1\u30fc\u30e0\u6570|\u53c2\u52a0\u30c1\u30fc\u30e0\u8a2d\u5b9a|\u767b\u9332", 90)
                     group_result = self._eleague_set_group_settings(driver, payload)
                     if not group_result or not group_result.get("ok"):
-                        failures.append(f"{label} グループ設定: {(group_result or {}).get('message', group_result)}")
+                        failures.append(f"{label} \u30b0\u30eb\u30fc\u30d7\u8a2d\u5b9a: {(group_result or {}).get('message', group_result)}")
                         continue
                     time.sleep(1.5)
 
-                    self._update_progress_dialog(
-                        f"{label}の組合わせ表へチームを割り当てています。({index}/{len(payloads)})\n"
-                        "左のチームリストを1番から順にTableへ設定します。"
-                    )
+                    if use_progress:
+                        self._update_progress_dialog(
+                            f"{label}\u306e\u7d44\u5408\u308f\u305b\u8868\u3078\u30c1\u30fc\u30e0\u3092\u5272\u308a\u5f53\u3066\u3066\u3044\u307e\u3059\u3002({index}/{len(payloads)})\n"
+                            "\u5de6\u306e\u30c1\u30fc\u30e0\u30ea\u30b9\u30c8\u30921\u756a\u304b\u3089\u9806\u306bTable\u3078\u8a2d\u5b9a\u3057\u307e\u3059\u3002"
+                        )
                     driver.get(f"https://safe.omyutech.com/cup/{cup_id}/tournament")
+                    focus_chrome_window(driver)
                     wait_ready()
-                    wait_page_text(r"チーム列の設定先|チームリスト|組合わせ|チーム", 60)
+                    wait_page_text(r"\u7d44\u5408\u308f\u305b|\u30c1\u30fc\u30e0\u5217\u306e\u8a2d\u5b9a\u5148|\u30c1\u30fc\u30e0\u30ea\u30b9\u30c8|\u30c1\u30fc\u30e0", 90)
                     assign_result = self._eleague_assign_tournament_teams(driver, payload)
                     if assign_result and assign_result.get("ok"):
-                        successes.append(f"{label}: {len(assign_result.get('assigned') or [])}チーム")
+                        successes.append(f"{label}: {len(assign_result.get('assigned') or [])}\u30c1\u30fc\u30e0")
                         time.sleep(1.2)
                     else:
-                        failures.append(f"{label} 組合わせ設定: {(assign_result or {}).get('message', assign_result)}")
+                        failures.append(f"{label} \u7d44\u5408\u308f\u305b\u8a2d\u5b9a: {(assign_result or {}).get('message', assign_result)}")
             finally:
-                self._close_progress_dialog()
+                if use_progress:
+                    self._close_progress_dialog()
             try:
                 self.root.lift()
                 self.root.focus_force()
@@ -5696,12 +6134,12 @@ function targetButtons() {
             if failures:
                 messagebox.showwarning(
                     APP_NAME,
-                    "E-League第五段階を実行しました。\n\n"
-                    f"成功:\n{chr(10).join(successes) if successes else 'なし'}\n\n"
-                    "失敗:\n" + "\n".join(failures),
+                    "E-League\u30c1\u30fc\u30e0\u8a2d\u5b9a\u3092\u5b9f\u884c\u3057\u307e\u3057\u305f\u3002\n\n"
+                    f"\u6210\u529f:\n{chr(10).join(successes) if successes else '\u306a\u3057'}\n\n"
+                    "\u5931\u6557:\n" + "\n".join(failures),
                 )
             else:
-                messagebox.showinfo(APP_NAME, "E-League第五段階が完了しました。\n" + "\n".join(successes))
+                messagebox.showinfo(APP_NAME, "E-League\u30c1\u30fc\u30e0\u8a2d\u5b9a\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002\n" + "\n".join(successes))
         except Exception as e:
             self._close_progress_dialog()
             logging.error(traceback.format_exc())
@@ -5958,6 +6396,7 @@ function findDialogButton(labels) {
                 f"{summary}\n\n対象は１部・２部のみです。続行しますか？",
             ):
                 return
+            use_progress = True
             self._show_progress_dialog(
                 "E-League 記録員設定",
                 "Chromeを準備しています。\nしばらくお待ちください。",
@@ -6005,7 +6444,8 @@ function findDialogButton(labels) {
                     else:
                         failures.append(f"{label}: {(result or {}).get('message', result)}")
             finally:
-                self._close_progress_dialog()
+                if use_progress:
+                    self._close_progress_dialog()
             try:
                 self.root.lift()
                 self.root.focus_force()
@@ -6067,14 +6507,10 @@ function findDialogButton(labels) {
                 )
                 body_text = driver.execute_script("return document.body ? (document.body.innerText || document.body.textContent || '') : ''")
                 if "ログイン" in body_text and "大会名" not in body_text:
-                    messagebox.showinfo(
-                        APP_NAME,
-                        "E-Leagueのログイン画面が開きました。\n\n"
-                        "開いたChromeで手動ログインしてください。\n"
-                        "ログイン後、このメッセージのOKを押すと大会作成を続行します。",
+                    raise RuntimeError(
+                        "E-League\u306e\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u304c\u8868\u793a\u3055\u308c\u305f\u305f\u3081\u3001\u5927\u4f1a\u4f5c\u6210\u3092\u505c\u6b62\u3057\u307e\u3057\u305f\u3002\n\n"
+                        "\u5148\u306bChrome\u3067E-League\u3078\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304b\u3089\u3001\u3082\u3046\u4e00\u5ea6\u5927\u4f1a\u4f5c\u6210\u3092\u5b9f\u884c\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
                     )
-                    driver.get(create_url)
-                    wait_ready()
                 result = self._eleague_autofill_create_form(driver, payload)
                 if result and result.get("ok"):
                     successes.append(payload["division"])
@@ -6127,8 +6563,16 @@ function findDialogButton(labels) {
 
         if self.wp_driver is not None:
             try:
-                _ = self.wp_driver.current_url
-                return self.wp_driver, WebDriverWait
+                handles = list(self.wp_driver.window_handles)
+                if handles:
+                    try:
+                        current = self.wp_driver.current_window_handle
+                    except Exception:
+                        current = None
+                    if current not in handles:
+                        self.wp_driver.switch_to.window(handles[-1])
+                    _ = self.wp_driver.current_url
+                    return self.wp_driver, WebDriverWait
             except Exception:
                 self.wp_driver = None
 
@@ -6141,6 +6585,7 @@ function findDialogButton(labels) {
             options.add_argument(f"--user-data-dir={profile}")
             options.add_argument("--profile-directory=Default")
             options.add_argument("--start-maximized")
+            options.add_argument("--remote-debugging-port=9222")
             options.add_experimental_option("detach", True)
             return options
 
@@ -6149,6 +6594,14 @@ function findDialogButton(labels) {
             return self.wp_driver, WebDriverWait
         except Exception as e:
             last_error = e
+
+        try:
+            attach_options = ChromeOptions()
+            attach_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+            self.wp_driver = webdriver.Chrome(options=attach_options)
+            return self.wp_driver, WebDriverWait
+        except Exception as e:
+            last_error = f"{last_error} / attach existing Chrome: {e}"
 
         manager_pack = safe_import_webdriver_manager()
         if manager_pack is not None:
@@ -6632,6 +7085,7 @@ return [...root.querySelectorAll('button, [role="button"]')]
                 return
 
             driver, WebDriverWait = self._get_wp_driver()
+            focus_chrome_window(driver)
 
             script = r'''const done = arguments[arguments.length - 1];
 const game = arguments[0];
@@ -7011,6 +7465,7 @@ async function fillDialog() {
             total_count = sum(len(games) for _label, _url, games in batches)
             for label, eleague_url, games in batches:
                 driver.get(eleague_url)
+                focus_chrome_window(driver)
                 WebDriverWait(driver, 60).until(lambda d: d.execute_script("return document.readyState") in ("interactive", "complete"))
                 WebDriverWait(driver, 30).until(
                     lambda d: d.execute_script("return !!document.querySelector('table') && /チーム/.test(document.body ? document.body.innerText : '');")
@@ -7033,14 +7488,19 @@ async function fillDialog() {
                             continue
                         raise
                     if not result or not result.get("ok"):
-                        failures.append(f"{prefix} / {result}")
+                        if isinstance(result, dict):
+                            detail = result.get("message") or result.get("error") or repr(result)
+                        else:
+                            detail = repr(result)
+                        failures.append(f"{prefix} / {detail}")
                         continue
                     try:
                         self._eleague_finish_dialog_native(driver, game, WebDriverWait)
                         success_count += 1
                     except Exception as e:
                         self._eleague_cancel_dialog_native(driver)
-                        failures.append(f"{prefix} / {str(e).splitlines()[0]}")
+                        detail = str(e).splitlines()[0] if str(e).strip() else type(e).__name__
+                        failures.append(f"{prefix} / {detail}")
                     time.sleep(0.4)
 
             focus_chrome_window(driver)
@@ -7092,6 +7552,7 @@ async function fillDialog() {
             "standings_text": self._get_text("standings_text"),
             "awards_text": self._get_text("awards_text") or self._get_text("standings_text"),
             "schedule_excel_file": self.schedule_excel_file_var.get().strip(),
+            "schedule_title": self.schedule_title_var.get().strip(),
             "schedule_download_url": self.schedule_download_url_var.get().strip(),
             "roster_mode": self.roster_mode_var.get() if hasattr(self, "roster_mode_var") else self.config_data.get("roster_mode", "all"),
             "roster_input_folder": self.roster_input_folder_var.get().strip() if hasattr(self, "roster_input_folder_var") else self.config_data.get("roster_input_folder", ""),
@@ -7321,6 +7782,8 @@ async function fillDialog() {
                 new_handles = list(set(driver.window_handles) - before_handles)
                 driver.switch_to.window(new_handles[-1] if new_handles else driver.window_handles[-1])
             except Exception:
+                self.wp_driver = None
+                driver, WebDriverWait = self._get_wp_driver()
                 driver.get(url)
 
             wait = WebDriverWait(driver, 60)
@@ -7547,6 +8010,17 @@ def run_customtkinter_or_legacy():
 if __name__ == "__main__":
     logging.info("LeaguePost started")
     run_customtkinter_or_legacy()
+
+
+
+
+
+
+
+
+
+
+
 
 
 
